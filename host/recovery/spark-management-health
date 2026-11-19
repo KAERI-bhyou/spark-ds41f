@@ -3,8 +3,18 @@ set -euo pipefail
 
 tag=spark-management-health
 
-if ! systemctl is-active --quiet ssh.service \
-  || [[ -z "$(ss -H -ltn 'sport = :22')" ]]; then
+# The ports sshd is configured to listen on (sshd_config "Port", default 22). A site may
+# keep SSH off port 22, so the check follows the configuration instead of assuming it.
+ssh_ports=$(sshd -T 2>/dev/null | awk '$1 == "port" { print $2 }')
+
+ssh_listening() {
+  local port
+  for port in ${ssh_ports:-22}; do
+    [[ -n "$(ss -H -ltn "sport = :$port")" ]] || return 1
+  done
+}
+
+if ! systemctl is-active --quiet ssh.service || ! ssh_listening; then
   logger -t "$tag" "SSH listener is unavailable; restarting ssh.service"
   systemctl restart ssh.service
 elif grep -q 'beginning MaxStartups throttling' \
